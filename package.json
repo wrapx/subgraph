@@ -1,0 +1,19 @@
+{
+  "name": "erc7527",
+  "license": "UNLICENSED",
+  "scripts": {
+    "codegen": "graph codegen --output-dir ./generated subgraph.yaml",
+    "gen": "node scripts/generate.js",
+    "build": "graph build subgraph.yaml",
+    "deploy": "graph deploy --node https://api.studio.thegraph.com/deploy/ erc7527 subgraph.yaml",
+    "create-local": "graph create --node http://localhost:8020/ erc7527",
+    "remove-local": "graph remove --node http://localhost:8020/ erc7527",
+    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 erc7527",
+    "test": "podman run -e RUST_BACKTRACE=1 -it --rm --mount type=bind,source=/Users/yuqing/ghj/code/github/wrap/erc7527,target=/matchstick matchstick",
+    "deploy-mainnet": "graph deploy --node https://api.studio.thegraph.com/deploy/ erc7527-eth  subgraph-mainnet.yaml"
+  },
+  "dependencies": {
+    "@graphprotocol/graph-cli": "^0.79.0",
+    "@graphprotocol/graph-ts": "^0.35.1"
+  }
+}

@@ -1,0 +1,77 @@
+specVersion: 1.1.0
+description: WrapX Subgraph - ERC7527 Wrapper for ETH and ERC20 tokens
+repository: https://github.com/amandafanny/erc7527-subgraph.git
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: WrapXDeployer
+    network: bsc-testnet
+    source:
+      address: "0x90C1bf3829AdC593FbE18288aF830aBff31adC96" 
+      abi: WrapXDeployer
+      startBlock: 49252529
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - WrapXDeployment
+        - WrapXTokenInstance
+        - WrapXNativeInstance
+      abis:
+        - name: WrapXDeployer
+          file: ./abis/WrapXDeployer.json
+        - name: WrapXToken
+          file: ./abis/WrapXToken.json
+        - name: WrapXNative
+          file: ./abis/WrapXNative.json
+      eventHandlers:
+        - event: WrapXDeployed(indexed address,string,uint256,uint256,address)
+          handler: handleWrapXDeployed
+      file: ./src/deployer.ts
+templates:
+  - name: WrapXToken
+    kind: ethereum/contract
+    network: bsc-testnet
+    source:
+      abi: WrapXToken
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - WrapXTokenInstance
+        - TokenWrapOperation
+        - NFTData
+      abis:
+        - name: WrapXToken
+          file: ./abis/WrapXToken.json
+      eventHandlers:
+        - event: Wrap(indexed address,indexed uint256,uint256,uint256)
+          handler: handleWrap
+        - event: Unwrap(indexed address,indexed uint256,uint256,uint256)
+          handler: handleUnwrap
+      file: ./src/wrapx-token.ts
+  - name: WrapXNative
+    kind: ethereum/contract
+    network: bsc-testnet
+    source:
+      abi: WrapXNative
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - WrapXNativeInstance
+        - NativeWrapOperation
+        - NFTData
+      abis:
+        - name: WrapXNative
+          file: ./abis/WrapXNative.json
+      eventHandlers:
+        - event: Wrap(indexed address,indexed uint256,uint256,uint256)
+          handler: handleWrap
+        - event: Unwrap(indexed address,indexed uint256,uint256,uint256)
+          handler: handleUnwrap
+      file: ./src/wrapx-native.ts

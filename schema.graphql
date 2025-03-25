@@ -1,0 +1,83 @@
+type WrapXDeployment @entity(immutable: true) {
+  id: Bytes!
+  instance: Bytes!  # 部署的合约地址
+  name: String!     # 集合名称
+  basePremium: BigInt!  # 基础溢价
+  maxSupply: BigInt!    # 最大供应量
+  tokenAddress: Bytes   # 代币地址，address(0)表示ETH，否则是ERC20代币地址
+  wrapType: String!     # "Native" 或 "Token"
+  blockNumber: BigInt!
+  timestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type WrapXTokenInstance @entity {
+  id: Bytes!
+  address: Bytes!
+  name: String!
+  basePremium: BigInt!
+  maxSupply: BigInt!
+  tokenAddress: Bytes!  # ERC20代币地址
+  currentSupply: BigInt!
+  tvl: BigInt!
+  operations: [TokenWrapOperation!]! @derivedFrom(field: "wrapInstance")
+  nfts: [NFTData!]! @derivedFrom(field: "tokenInstance")
+  createdAt: BigInt!
+  createdAtBlock: BigInt!
+  createdInTx: Bytes!
+}
+
+type WrapXNativeInstance @entity {
+  id: Bytes!
+  address: Bytes!
+  name: String!
+  basePremium: BigInt!
+  maxSupply: BigInt!
+  currentSupply: BigInt!
+  tvl: BigInt!
+  operations: [NativeWrapOperation!]! @derivedFrom(field: "wrapInstance")
+  nfts: [NFTData!]! @derivedFrom(field: "nativeInstance")
+  createdAt: BigInt!
+  createdAtBlock: BigInt!
+  createdInTx: Bytes!
+}
+
+type NFTData @entity {
+  id: Bytes!
+  tokenId: BigInt!
+  owner: Bytes!
+  name: String!
+  tokenInstance: WrapXTokenInstance
+  nativeInstance: WrapXNativeInstance
+  tokenOperations: [TokenWrapOperation!]! @derivedFrom(field: "nft")
+  nativeOperations: [NativeWrapOperation!]! @derivedFrom(field: "nft")
+  lastUpdatedAt: BigInt!
+  lastUpdatedAtBlock: BigInt!
+  lastUpdatedInTx: Bytes!
+}
+
+type TokenWrapOperation @entity(immutable: true) {
+  id: Bytes!
+  nft: NFTData!
+  wrapInstance: WrapXTokenInstance!
+  type: String!  # "Wrap" or "Unwrap"
+  to: Bytes!
+  amount: BigInt!
+  fee: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
+
+type NativeWrapOperation @entity(immutable: true) {
+  id: Bytes!
+  nft: NFTData!
+  wrapInstance: WrapXNativeInstance!
+  type: String!  # "Wrap" or "Unwrap"
+  to: Bytes!
+  amount: BigInt!
+  fee: BigInt!
+  timestamp: BigInt!
+  blockNumber: BigInt!
+  transactionHash: Bytes!
+}
