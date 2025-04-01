@@ -1,58 +1,61 @@
-import {
-  WrapXNativeInstance,
-  NFTData,
-  NativeWrapOperation
-} from "../generated/schema";
-import { Bytes, dataSource, BigInt, Address } from "@graphprotocol/graph-ts";
-import {
-  Unwrap as UnwrapEvent,
-  Wrap as WrapEvent,
-  WrapXNative
-} from "../generated/templates/WrapXNative/WrapXNative";
+import { WrapXNativeInstance, NFTData, NativeWrapOperation } from "../generated/schema";
+import { Bytes, dataSource, BigInt, Address, log } from "@graphprotocol/graph-ts";
+import { Unwrap as UnwrapEvent, Wrap as WrapEvent, WrapXNative } from "../generated/templates/WrapXNative/WrapXNative";
+import { Mint as MintEvent } from "../generated/templates/WrapXNative/WrapXNative";
+import { createNftId, getDefaultNftName, tryDecodeBytes } from "./utils";
 
 export function handleWrap(event: WrapEvent): void {
   const tokenId = event.params.tokenId;
   const to = event.params.to;
   const premium = event.params.premium;
   const fee = event.params.fee;
-  
-  // 创建或更新 NFT 数据
-  const nftId = Bytes.fromUTF8(tokenId.toString());
+
+  // 获取当前合约地址
+  const contractAddress = dataSource.address();
+
+  // 加载对应的 WrapXNativeInstance
+  let instance = WrapXNativeInstance.load(contractAddress);
+  if (instance === null) {
+    log.warning("WrapXNativeInstance not found for address: {}", [contractAddress.toHexString()]);
+    return; // 如果找不到实例，则不处理此事件
+  }
+
+  // 创建唯一的 NFT ID
+  const nftId = createNftId(contractAddress, tokenId);
   let nftData = NFTData.load(nftId);
-  
-  const instanceId = dataSource.address();
-  let instance = WrapXNativeInstance.load(instanceId);
-  
+
+  // 创建 NFT 数据（如果不存在）- 通常这应该由 handleMint 完成
+  // 如果已经通过 Mint 事件创建，这里将跳过
   if (nftData === null) {
+    log.warning("NFT data not found in Wrap event, creating new: {}", [nftId.toHexString()]);
     nftData = new NFTData(nftId);
     nftData.tokenId = tokenId;
     nftData.owner = to;
-    nftData.name = instance ? instance.name + " #" + tokenId.toString() : "#" + tokenId.toString();
+    nftData.name = getDefaultNftName(instance.name, tokenId);
     nftData.tokenInstance = null;
-    nftData.nativeInstance = instanceId;
+    nftData.nativeInstance = contractAddress;
     nftData.lastUpdatedAt = BigInt.fromI32(0);
     nftData.lastUpdatedAtBlock = BigInt.fromI32(0);
     nftData.lastUpdatedInTx = Bytes.fromHexString("0x");
-    
-    // 更新实例的当前供应量
-    if (instance) {
-      instance.currentSupply = instance.currentSupply.plus(BigInt.fromI32(1));
-      instance.save();
-    }
+
+    // 只有在 NFT 数据不存在时才更新供应量
+    // 因为它应该已经在 handleMint 中更新过了
+    instance.currentSupply = instance.currentSupply.plus(BigInt.fromI32(1));
+    instance.save();
   }
-  
+
   nftData.owner = to;
   nftData.lastUpdatedAt = event.block.timestamp;
   nftData.lastUpdatedAtBlock = event.block.number;
   nftData.lastUpdatedInTx = event.transaction.hash;
   nftData.save();
-  
+
   // 创建包装操作记录
   const operationId = event.transaction.hash.concatI32(event.logIndex.toI32());
-  
+
   const operation = new NativeWrapOperation(operationId);
   operation.nft = nftId;
-  operation.wrapInstance = instanceId;
+  operation.wrapInstance = contractAddress;
   operation.type = "Wrap";
   operation.to = to;
   operation.amount = premium.plus(fee); // 总金额 = 溢价 + 费用
@@ -61,39 +64,32 @@ export function handleWrap(event: WrapEvent): void {
   operation.blockNumber = event.block.number;
   operation.transactionHash = event.transaction.hash;
   operation.save();
+
+  // 更新 TVL
+  updateInstanceTVL(contractAddress, instance);
+}
+
+// 提取 TVL 更新逻辑为单独的函数
+function updateInstanceTVL(contractAddress: Bytes, instance: WrapXNativeInstance): void {
+  const contract = WrapXNative.bind(Address.fromBytes(contractAddress));
   
-  // 更新 WrapXNative 实例数据
-  if (instance !== null) {
-    const contract = WrapXNative.bind(instanceId);
-    
-    // 使用合约中实际存在的方法获取 TVL
-    // 尝试几种可能的方法
-    let tvlUpdated = false;
-    
-    // 尝试 balanceOf 方法 (如果合约有此方法)
-    const balanceOfResult = contract.try_balanceOf(Address.fromString("0x0000000000000000000000000000000000000000"));
-    if (!balanceOfResult.reverted) {
-      instance.tvl = balanceOfResult.value;
+  let tvlUpdated = false;
+  
+  const balanceOfResult = contract.try_balanceOf(Address.fromString("0x0000000000000000000000000000000000000000"));
+  if (!balanceOfResult.reverted) {
+    instance.tvl = balanceOfResult.value;
+    tvlUpdated = true;
+  }
+  
+  if (!tvlUpdated) {
+    const totalSupplyResult = contract.try_totalSupply();
+    if (!totalSupplyResult.reverted) {
+      instance.tvl = totalSupplyResult.value;
       tvlUpdated = true;
     }
-    
-    // 如果上面的方法失败，尝试 totalSupply (如果合约有此方法)
-    if (!tvlUpdated) {
-      const totalSupplyResult = contract.try_totalSupply();
-      if (!totalSupplyResult.reverted) {
-        instance.tvl = totalSupplyResult.value;
-        tvlUpdated = true;
-      }
-    }
-    
-    // 如果所有方法都失败，可以保持当前值或设置为0
-    if (!tvlUpdated) {
-      // 可以选择不更新 TVL 或设置为 0
-      // instance.tvl = BigInt.fromI32(0);
-    }
-    
-    instance.save();
   }
+  
+  instance.save();
 }
 
 export function handleUnwrap(event: UnwrapEvent): void {
@@ -101,44 +97,41 @@ export function handleUnwrap(event: UnwrapEvent): void {
   const to = event.params.to;
   const premium = event.params.premium;
   const fee = event.params.fee;
-  
-  // 创建或更新 NFT 数据
-  const nftId = Bytes.fromUTF8(tokenId.toString());
-  let nftData = NFTData.load(nftId);
-  
-  const instanceId = dataSource.address();
-  let instance = WrapXNativeInstance.load(instanceId);
-  
-  if (nftData === null) {
-    nftData = new NFTData(nftId);
-    nftData.tokenId = tokenId;
-    nftData.owner = to;
-    nftData.name = instance ? instance.name + " #" + tokenId.toString() : "#" + tokenId.toString();
-    nftData.tokenInstance = null;
-    nftData.nativeInstance = instanceId;
-    nftData.lastUpdatedAt = BigInt.fromI32(0);
-    nftData.lastUpdatedAtBlock = BigInt.fromI32(0);
-    nftData.lastUpdatedInTx = Bytes.fromHexString("0x");
-  } else {
-    // 更新实例的当前供应量
-    if (instance) {
-      instance.currentSupply = instance.currentSupply.minus(BigInt.fromI32(1));
-      instance.save();
-    }
+
+  // 获取当前合约地址
+  const contractAddress = dataSource.address();
+
+  // 加载对应的 WrapXNativeInstance
+  let instance = WrapXNativeInstance.load(contractAddress);
+  if (instance === null) {
+    log.warning("WrapXNativeInstance not found for address: {}", [contractAddress.toHexString()]);
+    return; // 如果找不到实例，则不处理此事件
   }
-  
+
+  // 创建唯一的 NFT ID
+  const nftId = createNftId(contractAddress, tokenId);
+  let nftData = NFTData.load(nftId);
+
+  if (nftData === null) {
+    log.warning("NFT data not found for unwrap operation: {}", [nftId.toHexString()]);
+    return; // 如果找不到 NFT 数据，可能是异常情况
+  }
+
+  // 更新实例的当前供应量
+  instance.currentSupply = instance.currentSupply.minus(BigInt.fromI32(1));
+
   nftData.owner = to;
   nftData.lastUpdatedAt = event.block.timestamp;
   nftData.lastUpdatedAtBlock = event.block.number;
   nftData.lastUpdatedInTx = event.transaction.hash;
   nftData.save();
-  
+
   // 创建解包操作记录
   const operationId = event.transaction.hash.concatI32(event.logIndex.toI32());
-  
+
   const operation = new NativeWrapOperation(operationId);
   operation.nft = nftId;
-  operation.wrapInstance = instanceId;
+  operation.wrapInstance = contractAddress;
   operation.type = "Unwrap";
   operation.to = to;
   operation.amount = premium.plus(fee); // 总金额 = 溢价 + 费用
@@ -147,37 +140,57 @@ export function handleUnwrap(event: UnwrapEvent): void {
   operation.blockNumber = event.block.number;
   operation.transactionHash = event.transaction.hash;
   operation.save();
-  
-  // 更新 WrapXNative 实例数据
-  if (instance !== null) {
-    const contract = WrapXNative.bind(instanceId);
+
+  // 更新 TVL
+  updateInstanceTVL(contractAddress, instance);
+}
+
+export function handleMint(event: MintEvent): void {
+  // 从事件中获取数据
+  const to = event.params.to;
+  const tokenId = event.params.tokenId;
+  const name = event.params.name;
+
+  // 获取当前合约地址
+  const contractAddress = dataSource.address();
+
+  // 加载对应的 WrapXNativeInstance
+  let instance = WrapXNativeInstance.load(contractAddress);
+  if (instance === null) {
+    log.warning("WrapXNativeInstance not found for address in Mint event: {}", [contractAddress.toHexString()]);
+    return;
+  }
+
+  // 创建唯一的 NFT ID
+  const nftId = createNftId(contractAddress, tokenId);
+
+  // 检查 NFT 数据是否已存在
+  let nftData = NFTData.load(nftId);
+  if (nftData === null) {
+    nftData = new NFTData(nftId);
+    nftData.tokenId = tokenId;
+    nftData.tokenInstance = null;
+    nftData.nativeInstance = contractAddress;
+    nftData.lastUpdatedAt = BigInt.fromI32(0);
+    nftData.lastUpdatedAtBlock = BigInt.fromI32(0);
+    nftData.lastUpdatedInTx = Bytes.fromHexString("0x");
+
+    // 使用事件中的名称，如果不可解析则使用默认名称
+    let decodedName = tryDecodeBytes(name, getDefaultNftName(instance.name, tokenId));
+    nftData.name = decodedName;
+    log.info("NFT name from Mint event: {}", [decodedName]);
     
-    // 使用合约中实际存在的方法获取 TVL
-    // 尝试几种可能的方法
-    let tvlUpdated = false;
-    
-    // 尝试 balanceOf 方法 (如果合约有此方法)
-    const balanceOfResult = contract.try_balanceOf(Address.fromString("0x0000000000000000000000000000000000000000"));
-    if (!balanceOfResult.reverted) {
-      instance.tvl = balanceOfResult.value;
-      tvlUpdated = true;
-    }
-    
-    // 如果上面的方法失败，尝试 totalSupply (如果合约有此方法)
-    if (!tvlUpdated) {
-      const totalSupplyResult = contract.try_totalSupply();
-      if (!totalSupplyResult.reverted) {
-        instance.tvl = totalSupplyResult.value;
-        tvlUpdated = true;
-      }
-    }
-    
-    // 如果所有方法都失败，可以保持当前值或设置为0
-    if (!tvlUpdated) {
-      // 可以选择不更新 TVL 或设置为 0
-      // instance.tvl = BigInt.fromI32(0);
-    }
-    
+    // 添加更新供应量的逻辑
+    instance.currentSupply = instance.currentSupply.plus(BigInt.fromI32(1));
     instance.save();
   }
-} 
+
+  // 更新所有者和时间戳
+  nftData.owner = to;
+  nftData.lastUpdatedAt = event.block.timestamp;
+  nftData.lastUpdatedAtBlock = event.block.number;
+  nftData.lastUpdatedInTx = event.transaction.hash;
+  nftData.save();
+
+  log.info("Handled Mint event for token ID {}, name: {}", [tokenId.toString(), nftData.name]);
+}

@@ -52,6 +52,8 @@ templates:
           handler: handleWrap
         - event: Unwrap(indexed address,indexed uint256,uint256,uint256)
           handler: handleUnwrap
+        - event: Mint(indexed address,indexed uint256,indexed bytes)
+          handler: handleMint
       file: ./src/wrapx-token.ts
   - name: WrapXNative
     kind: ethereum/contract
@@ -74,4 +76,6 @@ templates:
           handler: handleWrap
         - event: Unwrap(indexed address,indexed uint256,uint256,uint256)
           handler: handleUnwrap
+        - event: Mint(indexed address,indexed uint256,indexed bytes)
+          handler: handleMint
       file: ./src/wrapx-native.ts
